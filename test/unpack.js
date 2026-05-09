@@ -2843,3 +2843,63 @@ t.test('dircache prune all on windows when symlink encountered', t => {
 
   t.end()
 })
+
+t.test('excessively deep subfolder nesting', t => {
+  const ReadEntry = require('../lib/read-entry.js')
+  const tf = path.resolve(fixtures, 'excessively-deep.tar')
+  const data = fs.readFileSync(tf)
+  const warnings = []
+  const onwarn = (code, data) => warnings.push([code, data])
+
+  const check = (t, maxDepth = 1024) => {
+    t.match(warnings, [
+      ['path excessively deep', {
+        tarCode: 'TAR_ENTRY_ERROR',
+        entry: ReadEntry,
+        path: /^\.(\/a){1024,}\/foo.txt$/,
+        depth: 222372,
+        maxDepth,
+      }],
+    ])
+    warnings.length = 0
+    t.end()
+  }
+
+  t.test('async', t => {
+    const cwd = t.testdir()
+    new Unpack({
+      cwd,
+      onwarn,
+    }).on('end', () => check(t)).end(data)
+  })
+
+  t.test('sync', t => {
+    const cwd = t.testdir()
+    new UnpackSync({
+      cwd,
+      onwarn,
+    }).end(data)
+    check(t)
+  })
+
+  t.test('async set md', t => {
+    const cwd = t.testdir()
+    new Unpack({
+      cwd,
+      onwarn,
+      maxDepth: 64,
+    }).on('end', () => check(t, 64)).end(data)
+  })
+
+  t.test('sync set md', t => {
+    const cwd = t.testdir()
+    new UnpackSync({
+      cwd,
+      onwarn,
+      maxDepth: 64,
+    }).end(data)
+    check(t, 64)
+  })
+
+  t.end()
+})
