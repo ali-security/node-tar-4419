@@ -2735,9 +2735,13 @@ t.test('dirCache pruning unicode normalized collisions', {
 
   const check = (path, dirCache, t) => {
     path = path.replace(/\\/g, '/')
-    t.strictSame([...dirCache.entries()], [
+    const café = Buffer.from([0x63, 0x61, 0x66, 0xc3, 0xa9]).toString()
+    const expected = [
       [`${path}/foo`, true],
-    ])
+      [`${path}/${café}`, true],
+    ].sort((a, b) => a[0].localeCompare(b[0]))
+    const actual = [...dirCache.entries()].sort((a, b) => a[0].localeCompare(b[0]))
+    t.strictSame(actual, expected)
     t.equal(fs.readFileSync(path + '/foo/bar', 'utf8'), 'x')
     t.end()
   }
