@@ -2903,3 +2903,147 @@ t.test('excessively deep subfolder nesting', t => {
 
   t.end()
 })
+
+t.test('GHSA-8qq5-rm4j-mr97 linkpath sanitization', t => {
+  const dir = path.join(unpackdir, 'ghsa-8qq5-linkpath')
+  const out = path.join(dir, 'out_repro')
+  const secretFile = path.join(dir, 'secret.txt')
+  const targetSym = '/some/absolute/path'
+
+  t.teardown(_ => rimraf(dir))
+  t.beforeEach(async () => {
+    await rimraf(dir)
+    mkdirp.sync(out)
+    fs.writeFileSync(secretFile, 'ORIGINAL DATA')
+  })
+
+  const exploitTar = Buffer.alloc(512 + 512 + 1024)
+
+  new Header({
+    path: 'exploit_hard',
+    type: 'Link',
+    size: 0,
+    linkpath: secretFile,
+  }).encode(exploitTar, 0)
+
+  new Header({
+    path: 'exploit_sym',
+    type: 'SymbolicLink',
+    size: 0,
+    linkpath: targetSym,
+  }).encode(exploitTar, 512)
+
+  t.test('async', t => {
+    const asyncOut = path.join(out, 'async')
+    mkdirp.sync(asyncOut)
+    new Unpack({
+      cwd: asyncOut,
+      preservePaths: false,
+    }).on('end', () => {
+      const hardPath = path.join(asyncOut, 'exploit_hard')
+      try {
+        fs.writeFileSync(hardPath, 'OVERWRITTEN')
+      } catch (er) {}
+      t.equal(fs.readFileSync(secretFile, 'utf8'), 'ORIGINAL DATA',
+        'hardlink should not point to secret file')
+
+      const symPath = path.join(asyncOut, 'exploit_sym')
+      try {
+        t.not(fs.readlinkSync(symPath), targetSym,
+          'symlink should not point to absolute path')
+      } catch (er) {
+        t.pass('symlink was correctly skipped or sanitized')
+      }
+
+      t.end()
+    }).end(exploitTar)
+  })
+
+  t.test('sync', t => {
+    const syncOut = path.join(out, 'sync')
+    mkdirp.sync(syncOut)
+    new UnpackSync({
+      cwd: syncOut,
+      preservePaths: false,
+    }).end(exploitTar)
+
+    const hardPath = path.join(syncOut, 'exploit_hard')
+    try {
+      fs.writeFileSync(hardPath, 'OVERWRITTEN')
+    } catch (er) {}
+    t.equal(fs.readFileSync(secretFile, 'utf8'), 'ORIGINAL DATA',
+      'hardlink should not point to secret file')
+
+    const symPath = path.join(syncOut, 'exploit_sym')
+    try {
+      t.not(fs.readlinkSync(symPath), targetSym,
+        'symlink should not point to absolute path')
+    } catch (er) {
+      t.pass('symlink was correctly skipped or sanitized')
+    }
+
+    t.end()
+  })
+
+  t.end()
+})
+
+t.test('GHSA symlink linkpath escapes extraction directory', t => {
+  const dir = path.join(unpackdir, 'ghsa-sym-linkpath-escape')
+  const out = path.join(dir, 'out')
+
+  t.teardown(_ => rimraf(dir))
+  t.beforeEach(async () => {
+    await rimraf(dir)
+    mkdirp.sync(out)
+  })
+
+  const data = makeTar([
+    {
+      path: 'bar/',
+      type: 'Directory',
+    },
+    {
+      path: 'bar/badlink.txt',
+      type: 'SymbolicLink',
+      linkpath: '../../oh/no',
+    },
+    '',
+    '',
+  ])
+
+  t.test('async', t => {
+    const warnings = []
+    const extractRoot = path.join(out, 'async')
+    mkdirp.sync(extractRoot)
+    new Unpack({
+      cwd: extractRoot,
+      onwarn: (w, d) => warnings.push([w, d]),
+    }).on('end', () => {
+      t.ok(
+        warnings.some(w => w[0] === 'linkpath escapes extraction directory'),
+        'warned symlink escape'
+      )
+      t.throws(() => fs.lstatSync(path.join(extractRoot, 'bar/badlink.txt')))
+      t.end()
+    }).end(data)
+  })
+
+  t.test('sync', t => {
+    const warnings = []
+    const syncRoot = path.join(out, 'sync')
+    mkdirp.sync(syncRoot)
+    new UnpackSync({
+      cwd: syncRoot,
+      onwarn: (w, d) => warnings.push([w, d]),
+    }).end(data)
+    t.ok(
+      warnings.some(w => w[0] === 'linkpath escapes extraction directory'),
+      'warned symlink escape'
+    )
+    t.throws(() => fs.lstatSync(path.join(syncRoot, 'bar/badlink.txt')))
+    t.end()
+  })
+
+  t.end()
+})
