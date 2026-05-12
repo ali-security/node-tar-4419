@@ -3160,3 +3160,65 @@ t.test('GHSA-34x7-hfp2-rc4v hardlink .. escape', t => {
 
   t.end()
 })
+
+t.test('no linking through a symlink', t => {
+  const types = ['Link', 'SymbolicLink']
+  for (const type of types) {
+    t.test(type, t => {
+      const exploit = makeTar([
+        {
+          type: 'SymbolicLink',
+          path: 'a/b/up',
+          linkpath: '../..',
+          mode: 0o755,
+        },
+        {
+          type: 'SymbolicLink',
+          path: 'a/b/escape',
+          linkpath: 'up/..',
+          mode: 0o755,
+        },
+        {
+          type,
+          path: 'exploit',
+          linkpath: 'a/b/escape/exploited-file',
+          mode: 0o755,
+        },
+        '',
+        '',
+      ])
+      t.test('sync', t => {
+        const dir = path.join(unpackdir, 'no-symlink-link', type, 'sync')
+        t.teardown(_ => rimraf(dir))
+        mkdirp.sync(dir + '/x')
+        fs.writeFileSync(dir + '/exploited-file', 'original content')
+        try {
+          new UnpackSync({ cwd: dir + '/x', strict: true }).end(exploit)
+        } catch (er) {}
+        t.equal(
+          fs.readFileSync(dir + '/exploited-file', 'utf8'),
+          'original content',
+        )
+        t.end()
+      })
+      t.test('async', t => {
+        const dir = path.join(unpackdir, 'no-symlink-link', type, 'async')
+        t.teardown(_ => rimraf(dir))
+        mkdirp.sync(dir + '/x')
+        fs.writeFileSync(dir + '/exploited-file', 'original content')
+        new Unpack({ cwd: dir + '/x', strict: true })
+          .on('error', () => {})
+          .on('end', () => {
+            t.equal(
+              fs.readFileSync(dir + '/exploited-file', 'utf8'),
+              'original content',
+            )
+            t.end()
+          })
+          .end(exploit)
+      })
+      t.end()
+    })
+  }
+  t.end()
+})
