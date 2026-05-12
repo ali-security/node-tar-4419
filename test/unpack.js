@@ -2933,6 +2933,18 @@ t.test('GHSA-8qq5-rm4j-mr97 linkpath sanitization', t => {
     linkpath: targetSym,
   }).encode(exploitTar, 512)
 
+  new Header({
+    path: 'sub/',
+    type: 'Directory',
+    size: 0,
+  }).encode(exploitTar, 1024)
+  new Header({
+    path: 'sub/exploit_sub',
+    type: 'Link',
+    size: 0,
+    linkpath: '../secret.txt',
+  }).encode(exploitTar, 1536)
+
   t.test('async', t => {
     const asyncOut = path.join(out, 'async')
     mkdirp.sync(asyncOut)
@@ -2946,6 +2958,13 @@ t.test('GHSA-8qq5-rm4j-mr97 linkpath sanitization', t => {
       } catch (er) {}
       t.equal(fs.readFileSync(secretFile, 'utf8'), 'ORIGINAL DATA',
         'hardlink should not point to secret file')
+
+      const subHardPath = path.join(asyncOut, 'sub/exploit_sub')
+      try {
+        fs.writeFileSync(subHardPath, 'OVERWRITTEN SUB')
+      } catch (er) {}
+      t.equal(fs.readFileSync(secretFile, 'utf8'), 'ORIGINAL DATA',
+        'nested hardlink with .. should not point to secret file')
 
       const symPath = path.join(asyncOut, 'exploit_sym')
       try {
@@ -2973,6 +2992,13 @@ t.test('GHSA-8qq5-rm4j-mr97 linkpath sanitization', t => {
     } catch (er) {}
     t.equal(fs.readFileSync(secretFile, 'utf8'), 'ORIGINAL DATA',
       'hardlink should not point to secret file')
+
+    const subHardPath = path.join(syncOut, 'sub/exploit_sub')
+    try {
+      fs.writeFileSync(subHardPath, 'OVERWRITTEN SUB')
+    } catch (er) {}
+    t.equal(fs.readFileSync(secretFile, 'utf8'), 'ORIGINAL DATA',
+      'nested hardlink with .. should not point to secret file')
 
     const symPath = path.join(syncOut, 'exploit_sym')
     try {
@@ -3042,6 +3068,93 @@ t.test('GHSA symlink linkpath escapes extraction directory', t => {
       'warned symlink escape'
     )
     t.throws(() => fs.lstatSync(path.join(syncRoot, 'bar/badlink.txt')))
+    t.end()
+  })
+
+  t.end()
+})
+
+t.test('GHSA-34x7-hfp2-rc4v hardlink .. escape', t => {
+  const dir = path.join(unpackdir, 'ghsa-34x7-hardlink')
+  const out = path.join(dir, 'out')
+  const secretFile = path.join(dir, 'secret.txt')
+
+  t.teardown(_ => rimraf(dir))
+  t.beforeEach(async () => {
+    await rimraf(dir)
+    mkdirp.sync(out)
+    fs.writeFileSync(secretFile, 'ORIGINAL DATA')
+  })
+
+  const data = makeTar([
+    {
+      path: 'exploit_hard',
+      type: 'Link',
+      linkpath: '../secret.txt',
+    },
+    {
+      path: 'sub/',
+      type: 'Directory',
+    },
+    {
+      path: 'sub/nested_hard',
+      type: 'Link',
+      linkpath: '../../secret.txt',
+    },
+    {
+      path: 'sub/valid_sym',
+      type: 'SymbolicLink',
+      linkpath: '../secret.txt',
+    },
+    '',
+    '',
+  ])
+
+  t.test('async', t => {
+    const warnings = []
+    const asyncOut = path.join(out, 'async')
+    mkdirp.sync(asyncOut)
+    new Unpack({
+      cwd: asyncOut,
+      onwarn: (w, d) => warnings.push([w, d]),
+    }).on('end', () => {
+      t.ok(warnings.some(w => w[0] === "linkpath contains '..'"),
+        'warned about hardlink with ..')
+
+      t.throws(() => fs.lstatSync(path.join(asyncOut, 'exploit_hard')))
+      t.throws(() => fs.lstatSync(path.join(asyncOut, 'sub/nested_hard')))
+
+      t.equal(fs.readFileSync(secretFile, 'utf8'), 'ORIGINAL DATA')
+
+      const symPath = path.join(asyncOut, 'sub', 'valid_sym')
+      t.ok(fs.lstatSync(symPath).isSymbolicLink(), 'symlink created')
+      t.equal(fs.readlinkSync(symPath), '../secret.txt')
+
+      t.end()
+    }).end(data)
+  })
+
+  t.test('sync', t => {
+    const warnings = []
+    const syncOut = path.join(out, 'sync')
+    mkdirp.sync(syncOut)
+    new UnpackSync({
+      cwd: syncOut,
+      onwarn: (w, d) => warnings.push([w, d]),
+    }).end(data)
+
+    t.ok(warnings.some(w => w[0] === "linkpath contains '..'"),
+      'warned about hardlink with ..')
+
+    t.throws(() => fs.lstatSync(path.join(syncOut, 'exploit_hard')))
+    t.throws(() => fs.lstatSync(path.join(syncOut, 'sub/nested_hard')))
+
+    t.equal(fs.readFileSync(secretFile, 'utf8'), 'ORIGINAL DATA')
+
+    const symPath = path.join(syncOut, 'sub', 'valid_sym')
+    t.ok(fs.lstatSync(symPath).isSymbolicLink(), 'symlink created')
+    t.equal(fs.readlinkSync(symPath), '../secret.txt')
+
     t.end()
   })
 
