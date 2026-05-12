@@ -2917,7 +2917,7 @@ t.test('GHSA-8qq5-rm4j-mr97 linkpath sanitization', t => {
     fs.writeFileSync(secretFile, 'ORIGINAL DATA')
   })
 
-  const exploitTar = Buffer.alloc(512 + 512 + 1024)
+  const exploitTar = Buffer.alloc(512 + 512 + 512 + 512 + 512 + 1024)
 
   new Header({
     path: 'exploit_hard',
@@ -2944,6 +2944,12 @@ t.test('GHSA-8qq5-rm4j-mr97 linkpath sanitization', t => {
     size: 0,
     linkpath: '../secret.txt',
   }).encode(exploitTar, 1536)
+
+  new Header({
+    path: 'a/winrootdotslink',
+    type: 'SymbolicLink',
+    linkpath: 'c:..\\foo\\bar',
+  }).encode(exploitTar, 2048)
 
   t.test('async', t => {
     const asyncOut = path.join(out, 'async')
@@ -2973,6 +2979,12 @@ t.test('GHSA-8qq5-rm4j-mr97 linkpath sanitization', t => {
       } catch (er) {
         t.pass('symlink was correctly skipped or sanitized')
       }
+
+      t.equal(
+        fs.readlinkSync(path.join(asyncOut, 'a/winrootdotslink')),
+        '..\\foo\\bar',
+        'symlink target should have root stripped',
+      )
 
       t.end()
     }).end(exploitTar)
@@ -3007,6 +3019,12 @@ t.test('GHSA-8qq5-rm4j-mr97 linkpath sanitization', t => {
     } catch (er) {
       t.pass('symlink was correctly skipped or sanitized')
     }
+
+    t.equal(
+      fs.readlinkSync(path.join(syncOut, 'a/winrootdotslink')),
+      '..\\foo\\bar',
+      'symlink target should have root stripped',
+    )
 
     t.end()
   })
