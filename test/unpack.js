@@ -2951,6 +2951,13 @@ t.test('GHSA-8qq5-rm4j-mr97 linkpath sanitization', t => {
     linkpath: 'c:..\\foo\\bar',
   }).encode(exploitTar, 2048)
 
+  const escapeExploitTar = Buffer.alloc(512 + 1024)
+  new Header({
+    path: 'a/winrootdotsescapelink',
+    type: 'SymbolicLink',
+    linkpath: 'c:..\\..\\..\\..\\foo\\bar',
+  }).encode(escapeExploitTar, 0)
+
   t.test('async', t => {
     const asyncOut = path.join(out, 'async')
     mkdirp.sync(asyncOut)
@@ -2990,6 +2997,21 @@ t.test('GHSA-8qq5-rm4j-mr97 linkpath sanitization', t => {
     }).end(exploitTar)
   })
 
+  t.test('async escape', t => {
+    const escapeOut = path.join(out, 'async_escape')
+    mkdirp.sync(escapeOut)
+    new Unpack({
+      cwd: escapeOut,
+      preservePaths: false,
+    }).on('end', () => {
+      t.throws(
+        () => fs.lstatSync(path.join(escapeOut, 'a/winrootdotsescapelink')),
+        'escaping symlink is not created',
+      )
+      t.end()
+    }).end(escapeExploitTar)
+  })
+
   t.test('sync', t => {
     const syncOut = path.join(out, 'sync')
     mkdirp.sync(syncOut)
@@ -3026,6 +3048,20 @@ t.test('GHSA-8qq5-rm4j-mr97 linkpath sanitization', t => {
       'symlink target should have root stripped',
     )
 
+    t.end()
+  })
+
+  t.test('sync escape', t => {
+    const escapeOut = path.join(out, 'sync_escape')
+    mkdirp.sync(escapeOut)
+    new UnpackSync({
+      cwd: escapeOut,
+      preservePaths: false,
+    }).end(escapeExploitTar)
+    t.throws(
+      () => fs.lstatSync(path.join(escapeOut, 'a/winrootdotsescapelink')),
+      'escaping symlink is not created',
+    )
     t.end()
   })
 
